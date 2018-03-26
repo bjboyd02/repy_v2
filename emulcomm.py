@@ -9,7 +9,7 @@
    with a reasonable environment.   This is used by repy.py to provide a 
    highly restricted (but usable) environment.
 """
-
+import servicelogger#bryan
 import socket
 
 # Armon: Used to check if a socket is ready
@@ -56,16 +56,16 @@ from exception_hierarchy import *
 
 ###### Module Data
 
-# This is a dictionary of all currently bound sockets. Since multiple 
+# This is a library of all currently bound sockets. Since multiple 
 # UDP bindings on a single port is hairy, we store bound sockets 
 # here, and use them for both sending and receiving if they are 
 # available. This feels slightly byzantine, but it allows us to 
-# avoid modifying the repy API. See also SeattleTestbed/repy_v2#9.
+# avoid modifying the repy API.
 #
 # Format of entries is as follows:
 # Key - 3-tuple of ("UDP", IP, Port)
 # Val - Bound socket object
-_BOUND_SOCKETS = {}
+_BOUND_SOCKETS = {} # Ticket = 1015 (Resolved)
 
 # If we have a preference for an IP/Interface this flag is set to True
 user_ip_interface_preferences = False
@@ -83,26 +83,6 @@ user_specified_ip_interface_list = []
 # if it is not specified explicitly by the user
 allowediplist = []
 cachelock = threading.Lock()  # This allows only a single simultaneous cache update
-
-# Trying to send a UDP datagram of more than MAX_ALLOWABLE_DGRAM_SIZE
-# bytes will generate uncatchable exceptions on Mac OS X, see
-# SeattleTestbed/repy_v2#113.
-#
-# On most platforms, UDP over IPv4 can possibly handle: 65,507 bytes =
-# 65,535 bytes (per its 16 bit "length" field)
-#    - 8 bytes for the UDP header
-#    -20 bytes for the IPv4 header.
-#
-# The limit on OS X is instead 9216, which you can see by executing
-#    `sysctl net.inet.udp.maxdgram`
-# on an OS X system. Because we value consistency across platforms
-# and think that behavior should be indistinguishable across platforms,
-# we apply this limitation to all platforms, so 9217 and above should
-# fail via RepyArgumentError from sendmessage.
-#
-# IPv6 jumbograms allow for UDP datagrams larger than that, but we ignore
-# this for now. For reference, see Section 4 of RFC 2675.
-MAX_ALLOWABLE_DGRAM_SIZE = 9216
 
 
 ##### Internal Functions
@@ -347,45 +327,6 @@ def _is_conn_refused_exception(exceptionobj):
   
   # Return if the error name is in our white list
   return (errname in refused_errors)
-
-
-
-def _is_conn_aborted_exception(exceptionobj):
-  """
-    <Purpose>
-    Determines if a given error number indicates that a
-    connection abort on the socket occurred.
-
-    <Arguments>
-    An exception object from a network call.
-
-    <Returns>
-    True if connection aborted, false otherwise
-    """
-  # Get the type
-  exception_type = type(exceptionobj)
-
-  # Only continue if the type is socket.error
-  if exception_type is not socket.error:
-    return False
-
-  # Get the error number
-  errnum = exceptionobj[0]
-
-
-  # Store a list of error messages meaning we are connected
-  aborted_errors = ["ECONNABORTED", "WSAECONNABORTED"]
-
-  # Convert the errno to and error string name
-  try:
-    errname = errno.errorcode[errnum]
-  except Exception,e:
-    # The error is unknown for some reason...
-    errname = None
-
-  # Return if the error name is in our white list
-  return (errname in aborted_errors)
-
 
 
 def _is_network_down_exception(exceptionobj):
@@ -765,7 +706,7 @@ def _get_localIP_to_remoteIP(connection_type, external_ip, external_port=80):
   sockobj = socket.socket(socket.AF_INET, connection_type)
 
   # Make sure that the socket obj doesn't hang forever in 
-  # case connect() is blocking. Fix to SeattleTestbed/repy_v2#7.
+  # case connect() is blocking. Fix to #1003
   sockobj.settimeout(1.0)
 
   try:
@@ -870,8 +811,8 @@ def sendmessage(destip, destport, message, localip, localport):
       ResourceForbiddenError (descends ResourceException?) when the local
         port isn't allowed
 
-      RepyArgumentError when the IPs, ports, and message aren't valid types
-        or values, or the message is longer than 9,216 bytes
+      RepyArgumentError when the local IP and port aren't valid types
+        or values
 
       AlreadyListeningError if there is an existing listening UDP socket
       on the same local IP and port.
@@ -928,11 +869,6 @@ def sendmessage(destip, destport, message, localip, localport):
   if not _is_allowed_localport("UDP", localport):
     raise ResourceForbiddenError("Provided localport is not allowed! Port: "+str(localport))
 
-  # Fix SeattleTestbed/repy_v2#113, large UDP datagrams crash the sandbox
-  if len(message) > MAX_ALLOWABLE_DGRAM_SIZE:
-    raise RepyArgumentError("Provided message is too long for UDP datagrams on"
-      " some platforms. Maximum length is 9216 bytes.")
-
   # Wait for netsend
   if _is_loopback_ipaddr(destip):
     nanny.tattle_quantity('loopsend', 0)
@@ -975,10 +911,6 @@ def sendmessage(destip, destport, message, localip, localport):
  
     if _is_addr_unavailable_exception(e):
       raise AddressBindingError("Cannot bind to the specified local ip, invalid!")
-    # Complain if the network is down for UDP, too
-    # (See SeattleTestbed/repy_v2#80 for details)
-    if _is_network_down_exception(e):
-      raise InternetConnectivityError("The network is down or cannot be reached from the local IP!")
 
     # Unknown error...
     else:
@@ -1204,10 +1136,6 @@ def _timed_conn_initialize(localip,localport,destip,destport, timeout):
 
   # Get a TCP socket bound to the local ip / port
   sock = _get_tcp_socket(localip, localport)
-  # Limit the socket buffer size, see SeattleTestbed/repy_v2#88
-  sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 10000)
-  sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 10000)
-
   sock.settimeout(timeout)
 
   try:
@@ -1232,10 +1160,6 @@ def _timed_conn_initialize(localip,localport,destip,destport, timeout):
         # Check if the connection was refused
         if _is_conn_refused_exception(e):
           raise ConnectionRefusedError("The connection was refused!") 
-
-        # Check for ECONNABORTED due to a server-sent RST
-        if _is_conn_aborted_exception(e):
-          raise ConnectionRefusedError("The remote side hung up before the connection was established.")
 
         # Check if this is recoverable (try again, timeout, etc)
         elif not _is_recoverable_network_exception(e):
@@ -1300,8 +1224,7 @@ def openconnection(destip, destport,localip, localport, timeout):
       still being cleaned up by the OS.
 
       ConnectionRefusedError (descends NetworkError) if the connection cannot 
-      be established because the destination port isn't being listened on,
-      or an ECONNABORTED error is encountered.
+      be established because the destination port isn't being listened on.
 
       TimeoutError (common to all API functions that timeout) if the 
       connection times out
@@ -1405,7 +1328,7 @@ def openconnection(destip, destport,localip, localport, timeout):
     # Unknown error...
     else:
       raise
-
+  servicelogger.log('bryan: emulcomm.py: openconnection()')
   emul_sock = EmulatedSocket(sock, on_loopback)
 
   # Tattle the resources used
@@ -1484,9 +1407,6 @@ def listenforconnection(localip, localport):
     on_loopback = _is_loopback_ipaddr(localip)
     # Get the socket
     sock = _get_tcp_socket(localip,localport)     
-    # Limit the socket buffer size, see SeattleTestbed/repy_v2#88
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 10000)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 10000)
     nanny.tattle_add_item('insockets',id(sock))
     # Get the maximum number of outsockets
     max_outsockets = nanny.get_resource_limit("outsockets")        
@@ -1548,10 +1468,6 @@ def _get_tcp_socket(localip, localport):
 def _get_udp_socket(localip, localport):
   # Create the UDP socket
   s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-  # Limit the socket buffer size, see SeattleTestbed/repy_v2#88
-  s.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, 66000)
-  s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 66000)
-
   if localip and localport:
     try:
       s.bind((localip, localport))
@@ -1884,7 +1800,7 @@ class EmulatedSocket:
     # Trim the message size to be less than the send buffer size.
     # This is a fix for http://support.microsoft.com/kb/823764
     message = message[:self.send_buffer_size-1]
-
+    servicelogger.log('bryan, emulcomm.py EmulatedSocket.send:MESSAGE')
     # Acquire the socket lock
     socket_lock.acquire()
     try:
@@ -1894,7 +1810,7 @@ class EmulatedSocket:
         raise KeyError # Socket is closed locally
  
       # Detect Socket Closed Remote
-      # Fixes SeattleTestbed/repy_v2#4.
+      # Fixes ticket#974
       (readable, writable, exception) = select.select([sock],[],[],0)
       # check if socket is readable.   This is true if the remote end closed.
       if readable:
@@ -2197,8 +2113,7 @@ class TCPServerSocket (object):
 
     <Exceptions>
       Raises SocketClosedLocal if close() has been called.
-      Raises SocketWouldBlockError if the operation would block, or
-          an ECONNABORTED was encountered.
+      Raises SocketWouldBlockError if the operation would block.
       Raises ResourcesExhaustedError if there are no free outsockets.
 
     <Resource Consumption>
@@ -2253,7 +2168,7 @@ class TCPServerSocket (object):
         # Close the socket, and raise
         new_socket.close()
         raise
-
+      servicelogger.log('bryan: emulcomm.py TCPServerSocket.getconnection(): wrapped_socket')
       wrapped_socket = EmulatedSocket(new_socket, is_on_loopback)
 
       # Return everything
@@ -2271,10 +2186,6 @@ class TCPServerSocket (object):
       # Check if this is a would-block error
       if _is_recoverable_network_exception(e):
         raise SocketWouldBlockError("No connections currently available!")
-
-      # Check for ECONNABORTED due to client-sent RST
-      elif _is_conn_aborted_exception(e):
-        raise SocketWouldBlockError("The remote side hung up before the connection was established.")
 
       else: 
         # Unexpected, close the socket, and then raise SocketClosedLocal
