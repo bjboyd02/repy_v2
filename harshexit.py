@@ -52,6 +52,12 @@ def portablekill(pid):
     init_ostype()
 
   if ostype == 'Linux' or ostype == 'Darwin':
+    # On Android, block until any pending sensor call has returned.
+    if osrealtype == 'Android':
+      # Acquire all sensor locks. This may take a few seconds, especially
+      # when text-to-speech is progressing.
+      for lock in repysensors.locklist:
+        lock.acquire(True)
     try:
       os.kill(pid, signal.SIGTERM)
     except:
@@ -135,8 +141,17 @@ def init_ostype():
   global osrealtype
 
   # figure out what sort of system we are...
-  osrealtype = platform.system()
 
+  # Android is easy, it has a special `android` module
+  try:
+    import android
+    osrealtype = "Android"
+    ostype = "Linux"
+    return
+  except ImportError:
+    pass
+
+  osrealtype = platform.system()
   # The Nokia N800 (and N900) uses the ARM architecture, 
   # and we change the constants on it to make disk checks happen less often 
   if platform.machine().startswith('armv'):
@@ -165,3 +180,15 @@ def init_ostype():
     return
 
   ostype = 'Unknown'
+
+
+# On Android, import repysensors for the sensor lock.
+# We do this down here because otherwise, a circular import chain
+# (that depends on our `init_ostype` to be defined) fails.
+try:
+  import android
+except ImportError:
+  pass
+else:
+  import repysensors
+

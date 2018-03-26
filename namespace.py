@@ -120,6 +120,16 @@ import safe # Used to get SafeDict
 import tracebackrepy
 import virtual_namespace
 
+# Store flag indicating whether we are running on Android,
+# and import the sensor modules if we are.
+try:
+  import android
+  IS_ANDROID = True
+  import repysensors
+except ImportError:
+  IS_ANDROID = False
+
+
 from exception_hierarchy import *
 
 # Save a copy of a few functions not available at runtime.
@@ -327,8 +337,20 @@ class Int(ValueProcessor):
       raise RepyArgumentError("Min value is %s." % self.min)
 
 
+
+class NoneOrFloat(ValueProcessor):
+  """Allows a NoneType or a float. This doesn't enforce the
+  allow_neg property of Float."""
+
+  def check(self, val):
+    if val is not None:
+      Float().check(val)
+
+
+
+
 class NoneOrInt(ValueProcessor):
-  """Allows a NoneType or an int. This doesn't enforce min limit on the
+  """Allows a NoneType or an int. This doesn't enforce the min limit on the
   ints."""
 
   def check(self, val):
@@ -357,7 +379,6 @@ class StrOrNone(ValueProcessor):
   def check(self, val):
     if val is not None:
       Str().check(val)
-
 
 
 
@@ -427,6 +448,12 @@ class Dict(ValueProcessor):
       raise RepyArgumentError("Invalid type %s" % type(val))
 
 
+class NoneOrListOrDict(ValueProcessor):
+  """Allows None, Lists or Dictionaries which may contain anything."""
+
+  def check(self, val):
+    if val is not None and not type(val) is dict and not type(val) is list:
+      raise RepyArgumentError("Invalid type %s" % type(val))
 
 
 
@@ -769,6 +796,210 @@ VIRTUAL_NAMESPACE_OBJECT_WRAPPER_INFO = {
        'args' : [DictOrSafeDict()],
        'return' : SafeDict()},
 }
+
+# On Android, define wrappers for sensor calls exposed through JNI.
+if IS_ANDROID:
+  SNAKEI_MISCINFO_WRAPPER_INFO = {
+    'get_bluetooth_info': {
+      'func': repysensors.get_bluetooth_info,
+      'args': [],
+      'return': NoneOrListOrDict()},
+    'get_bluetooth_scan_info': {
+      'func': repysensors.get_bluetooth_scan_info,
+      'args': [],
+      'return': NoneOrListOrDict()},
+    'is_wifi_enabled': {
+      'func': repysensors.is_wifi_enabled,
+      'args': [],
+      'return': Bool()},
+    'get_wifi_state': {
+      'func': repysensors.get_wifi_state,
+      'args': [],
+      'return': Int()},
+    'get_wifi_connection_info': {
+      'func': repysensors.get_wifi_connection_info,
+      'args': [],
+      'return': NoneOrListOrDict()},
+    'get_wifi_scan_info': {
+      'func': repysensors.get_wifi_scan_info,
+      'args': [],
+      'return': NoneOrListOrDict()},
+    'get_network_info': {
+      'func': repysensors.get_network_info,
+      'args': [],
+      'return': NoneOrListOrDict()},
+    'get_cellular_provider_info': {
+      'func': repysensors.get_cellular_provider_info,
+      'args': [],
+      'return': NoneOrListOrDict()},
+    'get_cell_info': {
+      'func': repysensors.get_cell_info,
+      'args': [],
+      'return': NoneOrListOrDict()},
+    'get_sim_info': {
+      'func': repysensors.get_sim_info,
+      'args': [],
+      'return': NoneOrListOrDict()},
+    'get_phone_info': {
+      'func': repysensors.get_phone_info,
+      'args': [],
+      'return': NoneOrListOrDict()},
+    'get_mode_settings': {
+      'func': repysensors.get_mode_settings,
+      'args': [],
+      'return': NoneOrListOrDict()},
+    'get_display_info': {
+      'func': repysensors.get_display_info,
+      'args': [],
+      'return': NoneOrListOrDict()},
+    'get_volume_info': {
+      'func': repysensors.get_volume_info,
+      'args': [],
+      'return': NoneOrListOrDict()},
+    'get_battery_info': {
+      'func': repysensors.get_battery_info,
+      'args': [],
+      'return': NoneOrListOrDict()},
+  }
+
+  SNAKEI_SENSOR_WRAPPER_INFO = {
+    'get_sensor_list': {
+            'func': repysensors.get_sensor_list,
+            'args': [],
+            'return': NoneOrListOrDict()},
+    'get_acceleration': {
+            'func': repysensors.get_acceleration,
+            'args': [],
+            'return': NoneOrListOrDict()},
+    'get_ambient_temperature': {
+            'func': repysensors.get_ambient_temperature,
+            'args': [],
+            'return': NoneOrFloat()},
+    'get_game_rotation_vector': {
+            'func': repysensors.get_game_rotation_vector,
+            'args': [],
+            'return': NoneOrListOrDict()},
+    'get_geomagnetic_rotation_vector': {
+            'func': repysensors.get_geomagnetic_rotation_vector,
+            'args': [],
+            'return': NoneOrListOrDict()},
+    'get_gravity': {
+            'func': repysensors.get_gravity,
+            'args': [],
+            'return': NoneOrListOrDict()},
+    'get_gyroscope': {
+            'func': repysensors.get_gyroscope,
+            'args': [],
+            'return': NoneOrListOrDict()},
+    'get_gyroscope_uncalibrated': {
+            'func': repysensors.get_gyroscope_uncalibrated,
+            'args': [],
+            'return': NoneOrListOrDict()},
+    'get_heart_rate': {
+            'func': repysensors.get_heart_rate,
+            'args': [],
+            'return': NoneOrFloat()},
+    'get_light': {
+            'func': repysensors.get_light,
+            'args': [],
+            'return': NoneOrInt()},
+    'get_linear_acceleration': {
+            'func': repysensors.get_linear_acceleration,
+            'args': [],
+            'return': NoneOrListOrDict()},
+    'get_magnetic_field': {
+            'func': repysensors.get_magnetic_field,
+            'args': [],
+            'return': NoneOrListOrDict()},
+    'get_magnetic_field_uncalibrated': {
+            'func': repysensors.get_magnetic_field_uncalibrated,
+            'args': [],
+            'return': NoneOrListOrDict()},
+    'get_pressure': {
+            'func': repysensors.get_pressure,
+            'args': [],
+            'return': NoneOrListOrDict()},
+    'get_proximity': {
+            'func': repysensors.get_proximity,
+            'args': [],
+            'return': NoneOrFloat()},
+    'get_relative_humidity': {
+            'func': repysensors.get_relative_humidity,
+            'args': [],
+            'return': NoneOrFloat()},
+    'get_rotation_vector': {
+            'func': repysensors.get_rotation_vector,
+            'args': [],
+            'return': NoneOrListOrDict()},
+    'get_step_counter': {
+            'func': repysensors.get_step_counter,
+            'args': [],
+            'return': NoneOrFloat()},
+  }
+
+  SNAKEI_MEDIA_WRAPPER_INFO = {
+    #'microphone_record': {
+    #    'func': repysensors.microphone_record,
+    #    'args': [Str(maxlen=120), Int(min=0)],
+    #    'return': None},
+    'is_media_playing': {
+            'func': repysensors.is_media_playing,
+            'args': [],
+            'return': Bool()},
+    'is_tts_speaking': {
+            'func': repysensors.is_tts_speaking,
+            'args': [],
+            'return': Bool()},
+    'tts_speak': {
+            'func': repysensors.tts_speak,
+            'args': [Str(maxlen=1024)],
+            'return': None}
+  }
+
+  SNAKEI_LOCATION_WRAPPER_INFO = {
+    'get_location': {
+            'func': repysensors.get_location,
+            'args': [],
+            'return': NoneOrListOrDict()},
+    'get_lastknown_location': {
+            'func': repysensors.get_lastknown_location,
+            'args': [],
+            'return': NoneOrListOrDict()},
+    'get_geolocation': {
+            'func': repysensors.get_geolocation,
+            'args': [Float(True), Float(True), Int()],
+            'return': NoneOrListOrDict()}
+  }
+
+  SNAKEI_OUTPUTS_WRAPPER_INFO = {
+    'androidlog': {
+      'func': repysensors.android_log,
+      'args': [Str()],
+      'return': None},
+    'toast': {
+      'func': repysensors.toast,
+      'args': [Str()],
+      'return': None},
+    'notify': {
+      'func': repysensors.notify,
+      'args': [Str()],
+      'return': None},
+    'prompt': {
+      'func': repysensors.prompt,
+      'args': [Str()],
+      'return': Bool()},
+    'vibrate': {
+      'func': repysensors.vibrate,
+      'args': [Float()],
+      'return': None},
+  }
+
+  # Add sensor calls to the user namespace
+  USERCONTEXT_WRAPPER_INFO.update(SNAKEI_SENSOR_WRAPPER_INFO)
+  USERCONTEXT_WRAPPER_INFO.update(SNAKEI_MISCINFO_WRAPPER_INFO)
+  USERCONTEXT_WRAPPER_INFO.update(SNAKEI_MEDIA_WRAPPER_INFO)
+  USERCONTEXT_WRAPPER_INFO.update(SNAKEI_LOCATION_WRAPPER_INFO)
+  USERCONTEXT_WRAPPER_INFO.update(SNAKEI_OUTPUTS_WRAPPER_INFO)
 
 
 ##############################################################################
@@ -1229,17 +1460,6 @@ class NamespaceAPIFunctionWrapper(object):
       raise
 
     except:
-      # Code evaluated inside a `VirtualNamespace` may raise arbitrary
-      # errors, including plain Python exceptions. Reraise these errors
-      # so that the calling user code sees them.
-      # (Otherwise, things like `NameError`s in a virtual namespace
-      # crash the sandbox despite being wrapped in `try`/`except`,
-      # see SeattleTestbed/repy_v2#132.)
-      if type(args[0]) == virtual_namespace.VirtualNamespace:
-        raise
-
-      # Non-`RepyException`s outside of `VirtualNamespace` methods
-      # are unexpected and indicative of a programming error on
+      # Any other exception is unexpected and thus is a programming error on
       # our side, so we terminate.
       _handle_internalerror("Unexpected exception from within Repy API", 843)
-

@@ -82,8 +82,8 @@ import os           # This is for some path manipulation
 import sys          # This is to get sys.executable to launch the external process
 import time         # This is to sleep
 
-# Currently required to filter out Android-specific debug messages,
-# see SeattleTestbed/attic#1080 and safe_check() below.
+# Currently required to filter out Android-specific debug messages, cf #1080
+# and safe_check() below
 try:
   import android
   IS_ANDROID = True
@@ -108,17 +108,13 @@ import exception_hierarchy # For exception classes
 import encoding_header # Subtract len(ENCODING_HEADER) from error line numbers.
 
 
-# Fix to make repy compatible with Python 2.7.2 on Ubuntu 11.10,
-# see SeattleTestbed/repy_v2#24.
+# Fix to make repy compatible with Python 2.7.2 on Ubuntu 11.10 (ticket #1049)
 subprocess.getattr = getattr
-
-# SafeDict needs hasattr for `update`, see SeattleTestbed/repy_v2#125
-UserDict.hasattr = hasattr
 
 # Armon: This is how long we will wait for the external process
 # to validate the safety of the user code before we timeout, 
 # and exit with an exception
-# Increased from 10 to 15 seconds per SeattleTestbed/repy_v1#90.
+# AR: Increasing timeout to 15 seconds, see r3410 / #744
 EVALUTATION_TIMEOUT = 15
 
 if platform.machine().startswith('armv'):
@@ -170,8 +166,7 @@ _STR_NOT_CONTAIN = ['__']
 _STR_NOT_BEGIN = ['im_','func_','tb_','f_','co_',]
 
 # Disallow these exact strings.
-# encode and decode are not allowed because of the potential for
-# encoding bugs, see SeattleTestbed/repy_v1#120.
+#   encode and decode are not allowed because of the potential for encoding bugs (#982) 
 _STR_NOT_ALLOWED = ['encode','decode'] 
 
 def _is_string_safe(token):
@@ -245,8 +240,8 @@ def _check_node(node):
   <Return>
     None
   """
-  # Subtract length of encoding header from traceback line numbers,
-  # see SeattleTestbed/repy_v2#95.
+  # Subtract length of encoding header from traceback line numbers.
+  # (See Issue [SeattleTestbed/repy_v2#95])
   HEADERSIZE = len(encoding_header.ENCODING_DECLARATION.splitlines())
 
   # Proceed with the node check.
@@ -265,8 +260,7 @@ def _check_node(node):
     if attribute in _NODE_ATTR_OK: 
       continue
 
-    # JAC: don't check doc strings for __ and the like...,
-    # see SeattleTestbed/repy_v1#107.
+    # JAC: don't check doc strings for __ and the like... (#889)
     if attribute == 'doc' and (node.__class__.__name__ in
       ['Module', 'Function', 'Class']):
       continue
@@ -324,17 +318,38 @@ def safe_check_subprocess(code):
   <Return>
     See safe_check.
   """
+
+  if IS_ANDROID:
+    (readhandle, writehandle) = os.pipe()
+
+    procpid = os.fork()
+    if procpid == 0:
+      os.close(readhandle)
+
+      # Check the code
+      try:
+        output = str(safe_check(code))
+      except Exception, e:
+        output = str(type(e)) + " " + str(e)
+
+      nonportable.write_message_to_pipe(writehandle, "safe_check", output)
+      os._exit(0)
+
+    else:
+      os.close(writehandle)
+
+  else:
   
-  # Get the path to safe_check.py by using the original start directory of python
-  path_to_safe_check = os.path.join(repy_constants.REPY_START_DIR, "safe_check.py")
+    # Get the path to safe_check.py by using the original start directory of python
+    path_to_safe_check = os.path.join(repy_constants.REPY_START_DIR, "safe_check.py")
   
-  # Start a safety check process, reading from the user code and outputing to a pipe we can read
-  proc = subprocess.Popen([sys.executable, path_to_safe_check],
+    # Start a safety check process, reading from the user code and outputing to a pipe we can read
+    proc = subprocess.Popen([sys.executable, path_to_safe_check],
                           stdin=subprocess.PIPE, stdout=subprocess.PIPE)
   
-  # Write out the user code, close so the other end gets an EOF
-  proc.stdin.write(code)
-  proc.stdin.close()
+    # Write out the user code, close so the other end gets an EOF
+    proc.stdin.write(code)
+    proc.stdin.close()
   
   # Wait for the process to terminate
   starttime = nonportable.getruntime()
@@ -342,61 +357,35 @@ def safe_check_subprocess(code):
   # Only wait up to EVALUTATION_TIMEOUT seconds before terminating
   while nonportable.getruntime() - starttime < EVALUTATION_TIMEOUT:
     # Did the process finish running?
-    if proc.poll() != None:
-      break;
+    if (IS_ANDROID and os.waitpid(procpid, os.WNOHANG) != (0, 0)) or \
+        (not IS_ANDROID and proc.poll() != None):
+      break
+
     time.sleep(0.02)
   else:
     # Kill the timed-out process
     try:
-      harshexit.portablekill(proc.pid)
+      harshexit.portablekill(procpid)
     except:
       pass
     raise Exception, "Evaluation of code safety exceeded timeout threshold \
                     ("+str(nonportable.getruntime() - starttime)+" seconds)"
-  
-  # Read the output and close the pipe
-  rawoutput = proc.stdout.read()
-  proc.stdout.close()
-
-
-  # Interim fix for SeattleTestbed/attic#1080:
-  # Get rid of stray debugging output on Android of the form
-  # `dlopen libpython2.6.so` and `dlopen /system/lib/libc.so`,
-  # yet preserve all of the other output (including empty lines).
-
+    
   if IS_ANDROID:
-    output = ""
-    for line in rawoutput.split("\n"):
-      # Preserve empty lines
-      if line == "":
-        output += "\n"
-        continue
-      # Suppress debug messages we know can turn up
-      wordlist = line.split()
-      if wordlist[0]=="dlopen":
-        if wordlist[-1]=="/system/lib/libc.so":
-          continue
-        if wordlist[-1].startswith("libpython") and \
-          wordlist[-1].endswith(".so"):
-          # We expect "libpython" + version number + ".so".
-          # The version number should be a string convertible to float.
-          # If it's not, raise an exception.
-          try:
-            versionstring = (wordlist[-1].replace("libpython", 
-              "")).replace(".so", "")
-            junk = float(versionstring)
-          except TypeError, ValueError:
-            raise Exception("Unexpected debug output '" + line + 
-              "' while evaluating code safety!")
-      else:
-        output += line + "\n"
+    # Should return ("safe_check", "None")
+    msg = nonportable.read_message_from_pipe(readhandle)
+    
+    if type(msg) == tuple and len(msg) == 2 and msg[0] == "safe_check":
+      rawoutput = msg[1]
+    else:
+      rawoutput = ""
 
-    # Strip off the last newline character we added
-    output = output[0:-1]
+  else:
+    # Read the output and close the pipe
+    rawoutput = proc.stdout.read()
+    proc.stdout.close()
 
-  else: # We are *not* running on Android, proceed with unfiltered output
-    output = rawoutput
-
+  output = rawoutput
 
   # Check the output, None is success, else it is a failure
   if output == "None":
@@ -456,7 +445,7 @@ def safe_type(*args, **kwargs):
     raise exception_hierarchy.RunBuiltinException(
       'type() may only take exactly one non-keyword argument.')
 
-  # Fix for SeattleTestbed/repy_v1#128, block access to Python's `type`.
+  # Fix for #1189
 #  if _type(args[0]) is _type or _type(args[0]) is _compile_type:
 #    raise exception_hierarchy.RunBuiltinException(
 #      'unsafe type() call.')
@@ -741,9 +730,8 @@ class SafeDict(UserDict.DictMixin):
     # Return the safe keys
     return safe_keys
 
-  # Allow us to be printed.
-  # Overriding __repr__ gets around an infinite loop issue,
-  # SeattleTestbed/repy_v1#111, for simple cases.
+  # allow us to be printed
+  # this gets around the __repr__ infinite loop issue ( #918 ) for simple cases
   # It seems unlikely this is adequate for more complex cases (like safedicts
   # that refer to each other)
   def __repr__(self):
@@ -760,15 +748,6 @@ class SafeDict(UserDict.DictMixin):
   def copy(self):
     # Create a new instance
     copy_inst = SafeDict(self.__under__)
-
-    # Fix for recursion depth reached when copying and printing a
-    # SafeDict containing a reference to itself.
-    # https://github.com/SeattleTestbed/repy_v2/issues/97
-    # Caveat: dict.copy is expected to return a shallow copy, this fix
-    # introduces a partial deep copy for the contained self reference
-    for key, value in self.__under__.iteritems():
-      if value is self:
-        copy_inst[key] = copy_inst
 
     # Return the new instance
     return copy_inst

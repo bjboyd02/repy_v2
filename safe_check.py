@@ -27,13 +27,12 @@ if __name__ == "__main__":
     value = safe.safe_check(usercode)
     output += str(value)
   except Exception, e:
-    # Adjust traceback line numbers, see SeattleTestbed/repy_v2#95.
+    # Adjust traceback line numbers. See Issue [SeattleTestbed/repy_v2#95].
     try:
       e.lineno = e.lineno - \
           len(encoding_header.ENCODING_DECLARATION.splitlines())
-    except (TypeError, AttributeError):
-      # Ignore exceptions with line numbers that are non-numeric (i.e.
-      # `None`), or have no `lineno` attribute altogether.
+    except AttributeError:
+      # Some exceptions may not have line numbers.  If so, ignore
       pass
     output += str(type(e)) + " " + str(e)
   
